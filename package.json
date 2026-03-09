@@ -1,0 +1,63 @@
+{
+  "name": "rn-webview-lens",
+  "displayName": "React Native WebView Lens",
+  "description": "JavaScript syntax highlighting for react-native-webview injectedJavaScript props",
+  "version": "0.1.0",
+  "publisher": "gabriel",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "react-native",
+    "webview",
+    "syntax-highlighting",
+    "injectedJavaScript"
+  ],
+  "activationEvents": [
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "grammars": [
+      {
+        "scopeName": "inline-js.injection.rn-webview-lens",
+        "path": "./syntaxes/injection.json",
+        "injectTo": [
+          "source.js",
+          "source.jsx",
+          "source.ts",
+          "source.tsx"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.javascript": "javascript"
+        },
+        "tokenTypes": {
+          "meta.embedded.block.javascript": "other"
+        }
+      }
+    ]
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "test": "vitest run",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "@typescript-eslint/typescript-estree": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0",
+    "esbuild": "^0.20.0",
+    "typescript": "^5.4.0",
+    "vitest": "^3.0.0",
+    "@vscode/vsce": "^3.0.0"
+  }
+}

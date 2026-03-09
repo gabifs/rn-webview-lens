@@ -1,0 +1,38 @@
+{
+  "scopeName": "inline-js.injection.rn-webview-lens",
+  "injectionSelector": "L:source.js, L:source.jsx, L:source.ts, L:source.tsx",
+  "patterns": [
+    {
+      "begin": "(injectedJavaScriptBeforeContentLoaded)\\s*=\\s*\\{\\s*(`)",
+      "beginCaptures": {
+        "1": { "name": "entity.other.attribute-name.tsx" },
+        "2": { "name": "punctuation.definition.string.template.begin.js" }
+      },
+      "end": "(`)(\\s*\\})",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.string.template.end.js" },
+        "2": { "name": "meta.brace.curly.tsx" }
+      },
+      "contentName": "meta.embedded.block.javascript",
+      "patterns": [
+        { "include": "source.js" }
+      ]
+    },
+    {
+      "begin": "(injectedJavaScript)\\s*=\\s*\\{\\s*(`)",
+      "beginCaptures": {
+        "1": { "name": "entity.other.attribute-name.tsx" },
+        "2": { "name": "punctuation.definition.string.template.begin.js" }
+      },
+      "end": "(`)(\\s*\\})",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.string.template.end.js" },
+        "2": { "name": "meta.brace.curly.tsx" }
+      },
+      "contentName": "meta.embedded.block.javascript",
+      "patterns": [
+        { "include": "source.js" }
+      ]
+    }
+  ]
+}
