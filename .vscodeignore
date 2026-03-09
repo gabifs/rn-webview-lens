@@ -1,8 +1,12 @@
 src/
 test/
+example/
 node_modules/
-tsconfig.json
+.github/
 .vscode/
+tsconfig.json
+vitest.config.ts
+CLAUDE.md
 .gitignore
 *.vsix
 .DS_Store
