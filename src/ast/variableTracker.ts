@@ -1,78 +1,73 @@
-import { AST_NODE_TYPES } from '@typescript-eslint/typescript-estree';
-import type { TSESTree } from '@typescript-eslint/typescript-estree';
+import ts from 'typescript';
 import { parse } from './parser';
 import { TARGET_PROP_NAMES } from '../constants';
 
+export interface SourceLocation {
+  start: { line: number; column: number };
+  end: { line: number; column: number };
+}
+
 export interface TrackedInjectedScript {
   variableName: string;
-  loc: TSESTree.SourceLocation;
+  loc: SourceLocation;
   content: string;
 }
 
 export function trackVariables(source: string): TrackedInjectedScript[] {
-  const ast = parse(source);
-  if (!ast) return [];
+  const sourceFile = parse(source);
+  if (!sourceFile) return [];
 
   const referencedIdentifiers = new Set<string>();
   const results: TrackedInjectedScript[] = [];
 
   // Phase 1: Find all JSX attributes that reference variables or inline template literals
-  walkNode(ast, (node) => {
-    if (
-      node.type === AST_NODE_TYPES.JSXAttribute &&
-      node.name.type === AST_NODE_TYPES.JSXIdentifier &&
-      (TARGET_PROP_NAMES as readonly string[]).includes(node.name.name) &&
-      node.value?.type === AST_NODE_TYPES.JSXExpressionContainer
-    ) {
-      const expr = node.value.expression;
+  walkNode(sourceFile, (node) => {
+    if (!ts.isJsxAttribute(node)) return;
 
-      if (expr.type === AST_NODE_TYPES.Identifier) {
-        // Case 2/3: variable reference — collect for Phase 2
-        referencedIdentifiers.add(expr.name);
-      } else if (expr.type === AST_NODE_TYPES.TemplateLiteral) {
-        // Inline template literal
-        const content = extractStringContent(source, expr);
-        results.push({
-          variableName: `<inline:${node.name.name}>`,
-          loc: expr.loc,
-          content,
-        });
-      } else if (
-        expr.type === AST_NODE_TYPES.Literal &&
-        typeof expr.value === 'string'
-      ) {
-        // Inline string literal ('...' or "...")
-        const content = extractStringContent(source, expr);
-        results.push({
-          variableName: `<inline:${node.name.name}>`,
-          loc: expr.loc,
-          content,
-        });
-      }
+    const propName = node.name.text;
+    if (!(TARGET_PROP_NAMES as readonly string[]).includes(propName)) return;
+
+    const initializer = node.initializer;
+    if (!initializer || !ts.isJsxExpression(initializer)) return;
+
+    const expr = initializer.expression;
+    if (!expr) return;
+
+    if (ts.isIdentifier(expr)) {
+      // Case 2/3: variable reference — collect for Phase 2
+      referencedIdentifiers.add(expr.text);
+    } else if (ts.isNoSubstitutionTemplateLiteral(expr)) {
+      results.push({
+        variableName: `<inline:${propName}>`,
+        loc: getLoc(sourceFile, expr),
+        content: extractStringContent(source, sourceFile, expr),
+      });
+    } else if (ts.isStringLiteral(expr)) {
+      results.push({
+        variableName: `<inline:${propName}>`,
+        loc: getLoc(sourceFile, expr),
+        content: extractStringContent(source, sourceFile, expr),
+      });
     }
   });
 
   // Phase 2: Find variable declarations with template literal or string literal init
   if (referencedIdentifiers.size > 0) {
-    walkNode(ast, (node) => {
+    walkNode(sourceFile, (node) => {
+      if (!ts.isVariableDeclaration(node)) return;
+      if (!ts.isIdentifier(node.name)) return;
+      if (!referencedIdentifiers.has(node.name.text)) return;
+      if (!node.initializer) return;
+
       if (
-        node.type === AST_NODE_TYPES.VariableDeclarator &&
-        node.id.type === AST_NODE_TYPES.Identifier &&
-        referencedIdentifiers.has(node.id.name) &&
-        node.init
+        ts.isNoSubstitutionTemplateLiteral(node.initializer) ||
+        ts.isStringLiteral(node.initializer)
       ) {
-        if (
-          node.init.type === AST_NODE_TYPES.TemplateLiteral ||
-          (node.init.type === AST_NODE_TYPES.Literal &&
-            typeof node.init.value === 'string')
-        ) {
-          const content = extractStringContent(source, node.init);
-          results.push({
-            variableName: node.id.name,
-            loc: node.init.loc,
-            content,
-          });
-        }
+        results.push({
+          variableName: node.name.text,
+          loc: getLoc(sourceFile, node.initializer),
+          content: extractStringContent(source, sourceFile, node.initializer),
+        });
       }
     });
   }
@@ -80,33 +75,33 @@ export function trackVariables(source: string): TrackedInjectedScript[] {
   return results;
 }
 
+function getLoc(
+  sourceFile: ts.SourceFile,
+  node: ts.Node,
+): SourceLocation {
+  const start = ts.getLineAndCharacterOfPosition(
+    sourceFile,
+    node.getStart(sourceFile),
+  );
+  const end = ts.getLineAndCharacterOfPosition(sourceFile, node.end);
+  // Use 1-based lines to match previous @typescript-eslint behavior
+  return {
+    start: { line: start.line + 1, column: start.character },
+    end: { line: end.line + 1, column: end.character },
+  };
+}
+
 function extractStringContent(
   source: string,
-  node: TSESTree.TemplateLiteral | TSESTree.StringLiteral,
+  sourceFile: ts.SourceFile,
+  node: ts.StringLiteral | ts.NoSubstitutionTemplateLiteral,
 ): string {
-  // Extract raw content between the delimiters (backtick, single or double quote)
-  const start = node.range[0] + 1; // skip opening delimiter
-  const end = node.range[1] - 1; // skip closing delimiter
+  const start = node.getStart(sourceFile) + 1; // skip opening delimiter
+  const end = node.end - 1; // skip closing delimiter
   return source.slice(start, end);
 }
 
-function walkNode(
-  node: TSESTree.Node,
-  visitor: (node: TSESTree.Node) => void,
-): void {
+function walkNode(node: ts.Node, visitor: (node: ts.Node) => void): void {
   visitor(node);
-  for (const key of Object.keys(node)) {
-    const child = (node as Record<string, unknown>)[key];
-    if (child && typeof child === 'object') {
-      if (Array.isArray(child)) {
-        for (const item of child) {
-          if (item && typeof item === 'object' && 'type' in item) {
-            walkNode(item as TSESTree.Node, visitor);
-          }
-        }
-      } else if ('type' in child) {
-        walkNode(child as TSESTree.Node, visitor);
-      }
-    }
-  }
+  ts.forEachChild(node, (child) => walkNode(child, visitor));
 }

@@ -59,14 +59,12 @@
     ]
   },
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node",
-    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:typescript --format=cjs --platform=node --minify --tree-shaking=true",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:typescript --format=cjs --platform=node --watch",
     "test": "vitest run",
     "package": "vsce package"
   },
-  "dependencies": {
-    "@typescript-eslint/typescript-estree": "^8.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/vscode": "^1.75.0",
     "esbuild": "^0.20.0",

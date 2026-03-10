@@ -1,15 +1,14 @@
-import { parse as tsParse, AST } from '@typescript-eslint/typescript-estree';
+import ts from 'typescript';
 
-export type ParseResult = AST<{ jsx: true; loc: true; range: true }>;
-
-export function parse(source: string): ParseResult | null {
+export function parse(source: string): ts.SourceFile | null {
   try {
-    return tsParse(source, {
-      jsx: true,
-      loc: true,
-      range: true,
-      errorOnUnknownASTType: false,
-    });
+    return ts.createSourceFile(
+      'file.tsx',
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX,
+    );
   } catch {
     return null;
   }

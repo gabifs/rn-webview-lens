@@ -1,7 +1,26 @@
 import * as vscode from 'vscode';
-import { trackVariables } from '../ast/variableTracker';
-import { tokenizeJs } from '../tokenizer/jsTokenizer';
 import { SEMANTIC_TOKEN_TYPES, SEMANTIC_TOKEN_MODIFIERS } from '../constants';
+
+type TrackVariablesFn = typeof import('../ast/variableTracker').trackVariables;
+type TokenizeJsFn = typeof import('../tokenizer/jsTokenizer').tokenizeJs;
+
+let trackVariables: TrackVariablesFn | null = null;
+let tokenizeJs: TokenizeJsFn | null = null;
+
+async function loadModules(): Promise<{
+  trackVariables: TrackVariablesFn;
+  tokenizeJs: TokenizeJsFn;
+}> {
+  if (!trackVariables || !tokenizeJs) {
+    const [tracker, tokenizer] = await Promise.all([
+      import('../ast/variableTracker'),
+      import('../tokenizer/jsTokenizer'),
+    ]);
+    trackVariables = tracker.trackVariables;
+    tokenizeJs = tokenizer.tokenizeJs;
+  }
+  return { trackVariables, tokenizeJs };
+}
 
 export const legend = new vscode.SemanticTokensLegend(
   [...SEMANTIC_TOKEN_TYPES],
@@ -15,42 +34,69 @@ const tokenTypeIndex = new Map<string, number>(
 export class InjectedJsSemanticTokensProvider
   implements vscode.DocumentSemanticTokensProvider
 {
-  provideDocumentSemanticTokens(
+  private cache = new Map<
+    string,
+    { version: number; tokens: vscode.SemanticTokens }
+  >();
+
+  async provideDocumentSemanticTokens(
     document: vscode.TextDocument,
-    _token: vscode.CancellationToken,
-  ): vscode.SemanticTokens {
+    token: vscode.CancellationToken,
+  ): Promise<vscode.SemanticTokens> {
+    const uri = document.uri.toString();
+    const version = document.version;
+    const cached = this.cache.get(uri);
+    if (cached && cached.version === version) {
+      return cached.tokens;
+    }
+
     const builder = new vscode.SemanticTokensBuilder(legend);
     const source = document.getText();
-    const tracked = trackVariables(source);
+
+    if (!source.includes('injectedJavaScript')) {
+      const tokens = builder.build();
+      this.cache.set(uri, { version, tokens });
+      return tokens;
+    }
+
+    if (token.isCancellationRequested) return builder.build();
+
+    const modules = await loadModules();
+
+    if (token.isCancellationRequested) return builder.build();
+
+    const tracked = modules.trackVariables(source);
 
     for (const item of tracked) {
-      const jsTokens = tokenizeJs(item.content);
+      const jsTokens = modules.tokenizeJs(item.content);
 
-      // Template literal starts at item.loc.start (0-based line in AST, 1-based in source)
+      // Template literal starts at item.loc.start (1-based line in AST)
       // Content starts after the opening backtick
       const templateStartLine = item.loc.start.line - 1; // convert to 0-based
       const templateStartCol = item.loc.start.column + 1; // skip backtick
 
-      for (const token of jsTokens) {
-        const typeIdx = tokenTypeIndex.get(token.type);
+      for (const jsToken of jsTokens) {
+        const typeIdx = tokenTypeIndex.get(jsToken.type);
         if (typeIdx === undefined) continue;
 
-        const absoluteLine = templateStartLine + token.line;
+        const absoluteLine = templateStartLine + jsToken.line;
         const absoluteCol =
-          token.line === 0
-            ? templateStartCol + token.startChar
-            : token.startChar;
+          jsToken.line === 0
+            ? templateStartCol + jsToken.startChar
+            : jsToken.startChar;
 
         builder.push(
           absoluteLine,
           absoluteCol,
-          token.length,
+          jsToken.length,
           typeIdx,
-          token.modifiers ?? 0,
+          jsToken.modifiers ?? 0,
         );
       }
     }
 
-    return builder.build();
+    const tokens = builder.build();
+    this.cache.set(uri, { version, tokens });
+    return tokens;
   }
 }
