@@ -1,5 +1,3 @@
-import ts from 'typescript';
-import { parse } from './parser';
 import { TARGET_PROP_NAMES } from '../constants';
 
 export interface SourceLocation {
@@ -14,94 +12,206 @@ export interface TrackedInjectedScript {
 }
 
 export function trackVariables(source: string): TrackedInjectedScript[] {
-  const sourceFile = parse(source);
-  if (!sourceFile) return [];
-
-  const referencedIdentifiers = new Set<string>();
   const results: TrackedInjectedScript[] = [];
+  const referencedIdentifiers = new Set<string>();
 
-  // Phase 1: Find all JSX attributes that reference variables or inline template literals
-  walkNode(sourceFile, (node) => {
-    if (!ts.isJsxAttribute(node)) return;
+  // Phase 1: Find JSX attributes matching target props
+  for (const propName of TARGET_PROP_NAMES) {
+    const pattern = new RegExp(propName + '=\\{', 'g');
+    let match: RegExpExecArray | null;
 
-    const propName = node.name.text;
-    if (!(TARGET_PROP_NAMES as readonly string[]).includes(propName)) return;
+    while ((match = pattern.exec(source)) !== null) {
+      const exprStart = match.index + match[0].length;
+      const afterBrace = skipWhitespace(source, exprStart);
 
-    const initializer = node.initializer;
-    if (!initializer || !ts.isJsxExpression(initializer)) return;
-
-    const expr = initializer.expression;
-    if (!expr) return;
-
-    if (ts.isIdentifier(expr)) {
-      // Case 2/3: variable reference — collect for Phase 2
-      referencedIdentifiers.add(expr.text);
-    } else if (ts.isNoSubstitutionTemplateLiteral(expr)) {
-      results.push({
-        variableName: `<inline:${propName}>`,
-        loc: getLoc(sourceFile, expr),
-        content: extractStringContent(source, sourceFile, expr),
-      });
-    } else if (ts.isStringLiteral(expr)) {
-      results.push({
-        variableName: `<inline:${propName}>`,
-        loc: getLoc(sourceFile, expr),
-        content: extractStringContent(source, sourceFile, expr),
-      });
-    }
-  });
-
-  // Phase 2: Find variable declarations with template literal or string literal init
-  if (referencedIdentifiers.size > 0) {
-    walkNode(sourceFile, (node) => {
-      if (!ts.isVariableDeclaration(node)) return;
-      if (!ts.isIdentifier(node.name)) return;
-      if (!referencedIdentifiers.has(node.name.text)) return;
-      if (!node.initializer) return;
-
-      if (
-        ts.isNoSubstitutionTemplateLiteral(node.initializer) ||
-        ts.isStringLiteral(node.initializer)
-      ) {
-        results.push({
-          variableName: node.name.text,
-          loc: getLoc(sourceFile, node.initializer),
-          content: extractStringContent(source, sourceFile, node.initializer),
-        });
+      const ch = source[afterBrace];
+      if (ch === '`') {
+        // Inline template literal
+        const end = scanTemplateLiteral(source, afterBrace);
+        if (end !== -1) {
+          const content = source.slice(afterBrace + 1, end - 1);
+          results.push({
+            variableName: `<inline:${propName}>`,
+            loc: offsetToLoc(source, afterBrace, end),
+            content,
+          });
+        }
+      } else if (ch === '"' || ch === "'") {
+        // Inline string literal
+        const end = scanStringLiteral(source, afterBrace);
+        if (end !== -1) {
+          const content = source.slice(afterBrace + 1, end - 1);
+          results.push({
+            variableName: `<inline:${propName}>`,
+            loc: offsetToLoc(source, afterBrace, end),
+            content,
+          });
+        }
+      } else if (isIdentStart(ch)) {
+        // Variable reference
+        const identEnd = scanIdentifier(source, afterBrace);
+        const name = source.slice(afterBrace, identEnd);
+        referencedIdentifiers.add(name);
       }
-    });
+    }
+  }
+
+  // Phase 2: Find variable declarations for referenced identifiers
+  if (referencedIdentifiers.size > 0) {
+    for (const name of referencedIdentifiers) {
+      const declPattern = new RegExp(
+        '(?:const|let|var)\\s+' + escapeRegex(name) + '\\s*(?::\\s*string\\s*)?=\\s*',
+        'g',
+      );
+      let match: RegExpExecArray | null;
+
+      while ((match = declPattern.exec(source)) !== null) {
+        const valueStart = match.index + match[0].length;
+        const ch = source[valueStart];
+
+        if (ch === '`') {
+          const end = scanTemplateLiteral(source, valueStart);
+          if (end !== -1) {
+            const content = source.slice(valueStart + 1, end - 1);
+            results.push({
+              variableName: name,
+              loc: offsetToLoc(source, valueStart, end),
+              content,
+            });
+          }
+        } else if (ch === '"' || ch === "'") {
+          const end = scanStringLiteral(source, valueStart);
+          if (end !== -1) {
+            const content = source.slice(valueStart + 1, end - 1);
+            results.push({
+              variableName: name,
+              loc: offsetToLoc(source, valueStart, end),
+              content,
+            });
+          }
+        }
+        // If initializer is something else (function call, etc.), skip it
+      }
+    }
   }
 
   return results;
 }
 
-function getLoc(
-  sourceFile: ts.SourceFile,
-  node: ts.Node,
-): SourceLocation {
-  const start = ts.getLineAndCharacterOfPosition(
-    sourceFile,
-    node.getStart(sourceFile),
-  );
-  const end = ts.getLineAndCharacterOfPosition(sourceFile, node.end);
-  // Use 1-based lines to match previous @typescript-eslint behavior
-  return {
-    start: { line: start.line + 1, column: start.character },
-    end: { line: end.line + 1, column: end.character },
-  };
+/** Scan a template literal starting at the opening backtick. Returns position after closing backtick. */
+function scanTemplateLiteral(source: string, start: number): number {
+  let i = start + 1; // skip opening backtick
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '\\') {
+      i += 2; // skip escaped char
+    } else if (ch === '$' && source[i + 1] === '{') {
+      // Skip template expression ${...}
+      i = scanBraces(source, i + 1);
+      if (i === -1) return -1;
+    } else if (ch === '`') {
+      return i + 1; // position after closing backtick
+    } else {
+      i++;
+    }
+  }
+  return -1;
 }
 
-function extractStringContent(
+/** Scan a string literal starting at the opening quote. Returns position after closing quote. */
+function scanStringLiteral(source: string, start: number): number {
+  const quote = source[start];
+  let i = start + 1;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '\\') {
+      i += 2;
+    } else if (ch === quote) {
+      return i + 1;
+    } else {
+      i++;
+    }
+  }
+  return -1;
+}
+
+/** Scan balanced braces starting at an opening '{'. Returns position after closing '}'. */
+function scanBraces(source: string, start: number): number {
+  let depth = 0;
+  let i = start;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '{') {
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0) return i + 1;
+    } else if (ch === '`') {
+      i = scanTemplateLiteral(source, i);
+      if (i === -1) return -1;
+      continue;
+    } else if (ch === '"' || ch === "'") {
+      i = scanStringLiteral(source, i);
+      if (i === -1) return -1;
+      continue;
+    }
+    i++;
+  }
+  return -1;
+}
+
+function skipWhitespace(source: string, pos: number): number {
+  while (pos < source.length && /\s/.test(source[pos])) pos++;
+  return pos;
+}
+
+function isIdentStart(ch: string | undefined): boolean {
+  if (!ch) return false;
+  return /[a-zA-Z_$]/.test(ch);
+}
+
+function scanIdentifier(source: string, start: number): number {
+  let i = start;
+  while (i < source.length && /[a-zA-Z0-9_$]/.test(source[i])) i++;
+  return i;
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Convert character offsets to 1-based line / 0-based column SourceLocation. */
+function offsetToLoc(
   source: string,
-  sourceFile: ts.SourceFile,
-  node: ts.StringLiteral | ts.NoSubstitutionTemplateLiteral,
-): string {
-  const start = node.getStart(sourceFile) + 1; // skip opening delimiter
-  const end = node.end - 1; // skip closing delimiter
-  return source.slice(start, end);
-}
+  start: number,
+  end: number,
+): SourceLocation {
+  let line = 1;
+  let col = 0;
+  let startLoc = { line: 1, column: 0 };
+  let endLoc = { line: 1, column: 0 };
+  let foundStart = false;
 
-function walkNode(node: ts.Node, visitor: (node: ts.Node) => void): void {
-  visitor(node);
-  ts.forEachChild(node, (child) => walkNode(child, visitor));
+  for (let i = 0; i <= end && i < source.length; i++) {
+    if (i === start) {
+      startLoc = { line, column: col };
+      foundStart = true;
+    }
+    if (i === end) {
+      endLoc = { line, column: col };
+      break;
+    }
+    if (source[i] === '\n') {
+      line++;
+      col = 0;
+    } else {
+      col++;
+    }
+  }
+
+  if (!foundStart) startLoc = { line, column: col };
+  // If end is at source.length (past last char)
+  if (end >= source.length) endLoc = { line, column: col };
+
+  return { start: startLoc, end: endLoc };
 }

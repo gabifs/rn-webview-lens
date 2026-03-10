@@ -2,7 +2,7 @@
   "name": "rn-webview-lens",
   "displayName": "React Native WebView Lens",
   "description": "JavaScript syntax highlighting for react-native-webview injectedJavaScript props",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "gabifs",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -59,8 +59,8 @@
     ]
   },
   "scripts": {
-    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:typescript --format=cjs --platform=node --minify --tree-shaking=true",
-    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --external:typescript --format=cjs --platform=node --watch",
+    "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --minify --tree-shaking=true",
+    "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --watch",
     "test": "vitest run",
     "package": "vsce package"
   },
