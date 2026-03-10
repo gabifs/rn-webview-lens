@@ -47,11 +47,6 @@ All patterns work with both `injectedJavaScript` and `injectedJavaScriptBeforeCo
 
 `.js`, `.jsx`, `.ts`, `.tsx`
 
-## How It Works
-
-- **Inline template literals** use a TextMate injection grammar for zero-cost highlighting
-- **Variable references** and **string literals** use AST analysis with `@typescript-eslint/typescript-estree` to trace declarations and apply semantic token highlighting
-
 ## Known Limitations (v0.1)
 
 - Variable tracking only works within the same file
