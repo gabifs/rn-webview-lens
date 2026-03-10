@@ -3,8 +3,21 @@
   "displayName": "React Native WebView Lens",
   "description": "JavaScript syntax highlighting for react-native-webview injectedJavaScript props",
   "version": "0.1.0",
-  "publisher": "gabriel",
+  "publisher": "gabifs",
   "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gabifs/rn-webview-lens.git"
+  },
+  "homepage": "https://github.com/gabifs/rn-webview-lens#readme",
+  "bugs": {
+    "url": "https://github.com/gabifs/rn-webview-lens/issues"
+  },
+  "galleryBanner": {
+    "color": "#282c34",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -15,7 +28,8 @@
     "react-native",
     "webview",
     "syntax-highlighting",
-    "injectedJavaScript"
+    "injectedJavaScript",
+    "react-native-webview"
   ],
   "activationEvents": [
     "onLanguage:javascript",
